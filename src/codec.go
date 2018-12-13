@@ -1,6 +1,7 @@
 package codec
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -8,12 +9,14 @@ import (
 	"reflect"
 )
 
-const MaxUint = ^uint(0)
-const MinUint = 0
-const MaxInt = int(MaxUint >> 1)
-const MinInt = -MaxInt - 1
+// Implementation for Parity codec in Go.
+// Derived from https://github.com/paritytech/parity-codec/
+// While Rust implementation uses Rust type system and is highly optimized, this one
+// has to rely on Go's reflection and thus is notably slower.
+// Feature parity is almost full, apart from the lack of support for u128 (which are missing in Go).
 
-// Derived from https://github.com/paritytech/parity-codec/blob/master/src/codec.rs
+const maxUint = ^uint(0)
+const maxInt = int(maxUint >> 1)
 
 func check(err error) {
 	if err != nil {
@@ -21,57 +24,46 @@ func check(err error) {
 	}
 }
 
-// ParityEncoder - a wraper around a Writer that allows encoding data items to a stream
+// ParityEncoder is a wrapper around a Writer that allows encoding data items to a stream.
 type ParityEncoder struct {
 	writer io.Writer
 }
 
-func (self ParityEncoder) Write(bytes []byte) {
-	c, err := self.writer.Write(bytes)
+// Write several bytes to the encoder.
+func (pe ParityEncoder) Write(bytes []byte) {
+	c, err := pe.writer.Write(bytes)
 	check(err)
 	if c < len(bytes) {
 		panic(fmt.Sprintf("Could not write %d bytes to writer", len(bytes)))
 	}
 }
 
-func (self ParityEncoder) PushByte(b byte) {
-	self.Write([]byte{b})
+// PushByte writes a single byte to an encoder.
+func (pe ParityEncoder) PushByte(b byte) {
+	pe.Write([]byte{b})
 }
 
-func (self ParityEncoder) EncodeInteger(v uint64, size uintptr) {
-	buf := make([]byte, size)
-	switch size {
-	case 2:
-		binary.LittleEndian.PutUint16(buf, uint16(v))
-	case 4:
-		binary.LittleEndian.PutUint32(buf, uint32(v))
-	case 8:
-		binary.LittleEndian.PutUint64(buf, v)
-	}
-	self.Write(buf)
-}
-
-// compact encoding:
+// EncodeUintCompact writes an unsigned integer to the stream using the compact encoding.
+// A typical usage is storing the length of a collection.
+// Definition of compact encoding:
 // 0b00 00 00 00 / 00 00 00 00 / 00 00 00 00 / 00 00 00 00
 //   xx xx xx 00															(0 ... 2**6 - 1)		(u8)
 //   yL yL yL 01 / yH yH yH yL												(2**6 ... 2**14 - 1)	(u8, u16)  low LH high
 //   zL zL zL 10 / zM zM zM zL / zM zM zM zM / zH zH zH zM					(2**14 ... 2**30 - 1)	(u16, u32)  low LMMH high
 //   nn nn nn 11 [ / zz zz zz zz ]{4 + n}									(2**30 ... 2**536 - 1)	(u32, u64, u128, U256, U512, U520) straight LE-encoded
-
 // Rust implementation: see impl<'a> Encode for CompactRef<'a, u64>
-
-func (self ParityEncoder) EncodeUintCompact(v uint64) {
+func (pe ParityEncoder) EncodeUintCompact(v uint64) {
 
 	// TODO: handle numbers wide than 64 bits (byte slices?)
 	// Currently, Rust implementation only seems to support u128
 
 	if v < 1<<30 {
 		if v < 1<<6 {
-			self.PushByte(byte(v) << 2)
+			pe.PushByte(byte(v) << 2)
 		} else if v < 1<<14 {
-			binary.Write(self.writer, binary.LittleEndian, uint16(v<<2)+1)
+			binary.Write(pe.writer, binary.LittleEndian, uint16(v<<2)+1)
 		} else {
-			binary.Write(self.writer, binary.LittleEndian, uint32(v<<2)+2)
+			binary.Write(pe.writer, binary.LittleEndian, uint32(v<<2)+2)
 		}
 		return
 	}
@@ -85,13 +77,14 @@ func (self ParityEncoder) EncodeUintCompact(v uint64) {
 	if n > 4 {
 		panic("Assertion error: n>4 needed to compact-encode uint64")
 	}
-	self.PushByte((n << 2) + 3)
+	pe.PushByte((n << 2) + 3)
 	buf := make([]byte, 8)
 	binary.LittleEndian.PutUint64(buf, v)
-	self.Write(buf[:4+n])
+	pe.Write(buf[:4+n])
 }
 
-func (self ParityEncoder) Encode(value interface{}) {
+// Encode a value to the stream.
+func (pe ParityEncoder) Encode(value interface{}) {
 	t := reflect.TypeOf(value)
 	switch t.Kind() {
 
@@ -125,14 +118,14 @@ func (self ParityEncoder) Encode(value interface{}) {
 	case reflect.Float32:
 		fallthrough
 	case reflect.Float64:
-		binary.Write(self.writer, binary.LittleEndian, value)
+		binary.Write(pe.writer, binary.LittleEndian, value)
 	case reflect.Ptr:
 		rv := reflect.ValueOf(value)
 		if rv.IsNil() {
 			panic("Encoding null pointers not supported; consider using Option type")
 		} else {
 			dereferenced := rv.Elem()
-			self.Encode(dereferenced.Interface())
+			pe.Encode(dereferenced.Interface())
 		}
 
 	// Arrays and slices: first compact-encode length, then each item individually
@@ -145,19 +138,19 @@ func (self ParityEncoder) Encode(value interface{}) {
 		if len64 > math.MaxUint32 {
 			panic("Attempted to serialize a collection with too many elements.")
 		}
-		self.EncodeUintCompact(len64)
+		pe.EncodeUintCompact(len64)
 		for i := 0; i < len; i++ {
-			self.Encode(rv.Index(i).Interface())
+			pe.Encode(rv.Index(i).Interface())
 		}
 
 	// Strings are encoded as UTF-8 byte slices, just as in Rust
 	case reflect.String:
-		self.Encode([]byte(value.(string)))
+		pe.Encode([]byte(value.(string)))
 
 	case reflect.Struct:
 		encodeable := reflect.TypeOf((*ParityEncodeable)(nil)).Elem()
 		if t.Implements(encodeable) {
-			value.(ParityEncodeable).ParityEncode(self)
+			value.(ParityEncodeable).ParityEncode(pe)
 		} else {
 			panic(fmt.Sprintf("Type %s does not support ParityEncodeable interface", t))
 		}
@@ -182,45 +175,57 @@ func (self ParityEncoder) Encode(value interface{}) {
 	}
 }
 
-func (self ParityEncoder) EncodeOption(hasValue bool, value interface{}) {
+// EncodeOption stores optionally present value to the stream.
+func (pe ParityEncoder) EncodeOption(hasValue bool, value interface{}) {
 	if !hasValue {
-		self.PushByte(0)
+		pe.PushByte(0)
 	} else {
-		self.PushByte(1)
-		self.Encode(value)
+		pe.PushByte(1)
+		pe.Encode(value)
 	}
 }
 
-// ParityDecoder - a wraper around a Reader that allows decoding data items from a stream
+// ParityDecoder - a wraper around a Reader that allows decoding data items from a stream.
+// Unlike Rust implementations, decoder methods do not return success state, but just
+// panic on error. Since decoding failue is an "unexpected" error, this approach should
+// be justified.
 type ParityDecoder struct {
 	reader io.Reader
 }
 
-// Returns true only if the whole required number of bytes was read
-func (self ParityDecoder) Read(bytes []byte) bool {
-	c, err := self.reader.Read(bytes)
+// Read reads bytes from a stream into a buffer and panics if cannot read the required
+// number of bytes.
+func (pd ParityDecoder) Read(bytes []byte) {
+	c, err := pd.reader.Read(bytes)
 	check(err)
-	return c == len(bytes)
+	if c < len(bytes) {
+		panic(fmt.Sprintf("Cannot read the required number of bytes %d, only %d available", len(bytes), c))
+	}
 }
 
-func (self ParityDecoder) ReadByte() byte {
+// ReadOneByte reads a next byte from the stream.
+// Named so to avoid a linter warning about a clash with io.ByteReader.ReadByte
+func (pd ParityDecoder) ReadOneByte() byte {
 	buf := []byte{0}
-	self.Read(buf)
+	pd.Read(buf)
 	return buf[0]
 }
 
-// TODO: return error instead of panic?
-func (self ParityDecoder) Decode(target interface{}) {
+// Decode takes a pointer to a decodable value and populates it from the stream.
+func (pd ParityDecoder) Decode(target interface{}) {
 	t0 := reflect.TypeOf(target)
 	if t0.Kind() != reflect.Ptr {
-		panic("Target must be a non-nil pointer, but was " + fmt.Sprint(t0))
+		panic("Target must be a pointer, but was " + fmt.Sprint(t0))
 	}
-	rv := reflect.ValueOf(target).Elem()
-	self.DecodeIntoReflectValue(rv)
+	val := reflect.ValueOf(target)
+	if val.IsNil() {
+		panic("Target is a nil pointer")
+	}
+	pd.DecodeIntoReflectValue(val.Elem())
 }
 
-// TODO: return error instead of panic?
-func (self ParityDecoder) DecodeIntoReflectValue(target reflect.Value) {
+// DecodeIntoReflectValue populates a writable reflect.Value from the stream
+func (pd ParityDecoder) DecodeIntoReflectValue(target reflect.Value) {
 	t := target.Type()
 	if !target.CanSet() {
 		panic("Unsettable value " + fmt.Sprint(t))
@@ -260,25 +265,24 @@ func (self ParityDecoder) DecodeIntoReflectValue(target reflect.Value) {
 	case reflect.Float64:
 		intHolder := reflect.New(t)
 		intPointer := intHolder.Interface()
-		binary.Read(self.reader, binary.LittleEndian, intPointer)
+		binary.Read(pd.reader, binary.LittleEndian, intPointer)
 		target.Set(intHolder.Elem())
 
-	// Pointer in Go is nullable, so we are applying the same rules as there are for
-	// Option<T> in Rust implementation
-	// TODO(kyegupov): think about it more, is it what the users would expect?
-	// Perhaps we should just fail on nils and instead use Option wrapper or EncodeOptional method
+	// Pointers are encoded just as the referenced types, with panicking on nil.
+	// If you want to replicate Option<T> behavior in Rust, see OptionBool and an
+	// example type OptionInt8 in tests.
 	case reflect.Ptr:
-		self.DecodeIntoReflectValue(target.Elem())
+		pd.DecodeIntoReflectValue(target.Elem())
 
 	// Arrays and slices: first compact-encode length, then each item individually
 	case reflect.Array:
 		fallthrough
 	case reflect.Slice:
-		codedLen64 := self.DecodeUintCompact()
+		codedLen64 := pd.DecodeUintCompact()
 		if codedLen64 > math.MaxUint32 {
 			panic("Encoded array length is higher than allowed by the protocol (32-bit unsigned integer)")
 		}
-		if codedLen64 > uint64(MaxInt) {
+		if codedLen64 > uint64(maxInt) {
 			panic("Encoded array length is higher than allowed by the platform")
 		}
 		codedLen := int(codedLen64)
@@ -299,13 +303,13 @@ func (self ParityDecoder) DecodeIntoReflectValue(target reflect.Value) {
 			}
 		}
 		for i := 0; i < codedLen; i++ {
-			self.DecodeIntoReflectValue(target.Index(i))
+			pd.DecodeIntoReflectValue(target.Index(i))
 		}
 
 	// Strings are encoded as UTF-8 byte slices, just as in Rust
 	case reflect.String:
 		var bytes []byte
-		self.Decode(&bytes)
+		pd.Decode(&bytes)
 		target.SetString(string(bytes))
 
 	case reflect.Struct:
@@ -313,7 +317,7 @@ func (self ParityDecoder) DecodeIntoReflectValue(target reflect.Value) {
 		ptrType := reflect.PtrTo(t)
 		if ptrType.Implements(encodeable) {
 			ptrVal := reflect.New(t)
-			ptrVal.Interface().(ParityDecodeable).ParityDecode(self)
+			ptrVal.Interface().(ParityDecodeable).ParityDecode(pd)
 			target.Set(ptrVal.Elem())
 		} else {
 			panic(fmt.Sprintf("Type %s does not support ParityDecodeable interface", ptrType))
@@ -339,21 +343,22 @@ func (self ParityDecoder) DecodeIntoReflectValue(target reflect.Value) {
 	}
 }
 
-func (self ParityDecoder) DecodeUintCompact() uint64 {
-	b := self.ReadByte()
+// DecodeUintCompact decodes a compact-encoded integer. See EncodeUintCompact method.
+func (pd ParityDecoder) DecodeUintCompact() uint64 {
+	b := pd.ReadOneByte()
 	mode := b & 3
 	switch mode {
 	case 0:
 		return uint64(b >> 2)
 	case 1:
-		r := uint64(self.ReadByte())
+		r := uint64(pd.ReadOneByte())
 		r <<= 6
 		r += uint64(b >> 2)
 		return r
 	case 2:
 		buf := make([]byte, 4)
 		buf[0] = b
-		self.Read(buf[1:4])
+		pd.Read(buf[1:4])
 		r := binary.LittleEndian.Uint32(buf)
 		r >>= 2
 		return uint64(r)
@@ -363,54 +368,66 @@ func (self ParityDecoder) DecodeUintCompact() uint64 {
 			panic("Not supported: n>4 encountered when decoding a compact-encoded uint")
 		}
 		buf := make([]byte, 8)
-		self.Read(buf[:n+4])
+		pd.Read(buf[:n+4])
 		return binary.LittleEndian.Uint64(buf)
 	default:
 		panic("Code should be unreachable")
 	}
 }
 
-func (self ParityDecoder) DecodeOption(hasValue *bool, valuePointer interface{}) {
-	b := self.ReadByte()
+// DecodeOption decodes a optionally available value into a boolean presence field and a value.
+func (pd ParityDecoder) DecodeOption(hasValue *bool, valuePointer interface{}) {
+	b := pd.ReadOneByte()
 	switch b {
 	case 0:
 		*hasValue = false
 	case 1:
 		*hasValue = true
-		self.Decode(valuePointer)
+		pd.Decode(valuePointer)
 	default:
 		panic(fmt.Sprintf("Unknown byte prefix for encoded OptionBool: %d", b))
 	}
 }
 
+// ParityEncodeable is an interface that defines a custom encoding rules for a data type.
+// Should be defined for structs (not pointers to them).
+// See OptionBool for an example implementation.
 type ParityEncodeable interface {
-	// ParityEncode - encode and write this structure into a stream
+	// ParityEncode encodes and write this structure into a stream
 	ParityEncode(encoder ParityEncoder)
 }
 
+// ParityDecodeable is an interface that defines a custom encoding rules for a data type.
+// Should be defined for pointers to structs.
+// See OptionBool for an example implementation.
 type ParityDecodeable interface {
-	// ParityDecode - populate this structure from a stream (overwriting the current contents), return false on failure
+	// ParityDecode populates this structure from a stream (overwriting the current contents), return false on failure
 	ParityDecode(decoder ParityDecoder)
 }
 
+// OptionBool is a structure that can store a boolean or a missing value.
+// Note that encoding rules are slightly different from other "Option" fields.
 type OptionBool struct {
 	hasValue bool
 	value    bool
 }
 
+// NewOptionBoolEmpty creates an OptionBool without a value.
 func NewOptionBoolEmpty() OptionBool {
 	return OptionBool{false, false}
 }
 
+// NewOptionBool creates an OptionBool with a value.
 func NewOptionBool(value bool) OptionBool {
 	return OptionBool{true, value}
 }
 
-func (self OptionBool) ParityEncode(encoder ParityEncoder) {
-	if !self.hasValue {
+// ParityEncode implements encoding for OptionBool as per Rust implementation.
+func (o OptionBool) ParityEncode(encoder ParityEncoder) {
+	if !o.hasValue {
 		encoder.PushByte(0)
 	} else {
-		if self.value {
+		if o.value {
 			encoder.PushByte(1)
 		} else {
 			encoder.PushByte(2)
@@ -418,19 +435,27 @@ func (self OptionBool) ParityEncode(encoder ParityEncoder) {
 	}
 }
 
-func (self *OptionBool) ParityDecode(decoder ParityDecoder) {
-	b := decoder.ReadByte()
+// ParityDecode implements decoding for OptionBool as per Rust implementation.
+func (o *OptionBool) ParityDecode(decoder ParityDecoder) {
+	b := decoder.ReadOneByte()
 	switch b {
 	case 0:
-		self.hasValue = false
-		self.value = false
+		o.hasValue = false
+		o.value = false
 	case 1:
-		self.hasValue = true
-		self.value = true
+		o.hasValue = true
+		o.value = true
 	case 2:
-		self.hasValue = true
-		self.value = false
+		o.hasValue = true
+		o.value = false
 	default:
 		panic(fmt.Sprintf("Unknown byte prefix for encoded OptionBool: %d", b))
 	}
+}
+
+// ToKeyedVec replicates the behaviour of Rust's to_keyed_vec helper.
+func ToKeyedVec(value interface{}, prependKey []byte) []byte {
+	var buffer = bytes.NewBuffer(prependKey)
+	ParityEncoder{buffer}.Encode(value)
+	return buffer.Bytes()
 }

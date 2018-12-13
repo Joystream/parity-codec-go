@@ -13,8 +13,24 @@ func assertEqual(t *testing.T, a interface{}, b interface{}) {
 	if reflect.DeepEqual(a, b) {
 		return
 	}
-	// debug.PrintStack()
 	t.Errorf("Received %v (type %v), expected %v (type %v)", a, reflect.TypeOf(a), b, reflect.TypeOf(b))
+}
+
+func assertPanics(code func()) {
+	panicked := false
+	assertPanicsInner(code, &panicked)
+	if !panicked {
+		panic("Panic was expected, but code executed successfully")
+	}
+}
+
+func assertPanicsInner(code func(), panicked *bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			*panicked = true
+		}
+	}()
+	code()
 }
 
 func hexify(bytes []byte) string {
@@ -45,23 +61,47 @@ func TestSliceOfBytesEncodedAsExpected(t *testing.T) {
 	assertEqual(t, hexify(encodeToBytes(value)), "28 00 01 01 02 03 05 08 0d 15 22")
 }
 
+func TestArrayOfBytesEncodedAsExpected(t *testing.T) {
+	value := [10]byte{0, 1, 1, 2, 3, 5, 8, 13, 21, 34}
+	assertRoundtrip(t, value)
+	assertEqual(t, hexify(encodeToBytes(value)), "28 00 01 01 02 03 05 08 0d 15 22")
+}
+
+func TestArrayCannotBeDecodedIntoIncompatible(t *testing.T) {
+	value := [3]byte{1, 2, 3}
+	value2 := [5]byte{1, 2, 3, 4, 5}
+	value3 := [1]byte{42}
+	var buffer = bytes.Buffer{}
+	ParityEncoder{&buffer}.Encode(value)
+	assertPanics(func() { ParityDecoder{&buffer}.Decode(&value2) })
+	buffer.Reset()
+	ParityEncoder{&buffer}.Encode(value)
+	assertPanics(func() { ParityDecoder{&buffer}.Decode(&value3) })
+	buffer.Reset()
+	ParityEncoder{&buffer}.Encode(value)
+	ParityDecoder{&buffer}.Decode(&value)
+}
+
 func TestSliceOfInt16EncodedAsExpected(t *testing.T) {
 	value := []int16{0, 1, -1, 2, -2, 3, -3}
 	assertRoundtrip(t, value)
 	assertEqual(t, hexify(encodeToBytes(value)), "1c 00 00 01 00 ff ff 02 00 fe ff 03 00 fd ff")
 }
 
+// OptionInt8 is an example implementation of an "Option" type, mirroring Option<u8> in Rust version.
+// Since Go does not support generics, one has to define such types manually.
+// See below for ParityEncode / ParityDecode implementations.
 type OptionInt8 struct {
 	hasValue bool
 	value    int8
 }
 
-func (self OptionInt8) ParityEncode(encoder ParityEncoder) {
-	encoder.EncodeOption(self.hasValue, self.value)
+func (o OptionInt8) ParityEncode(encoder ParityEncoder) {
+	encoder.EncodeOption(o.hasValue, o.value)
 }
 
-func (self *OptionInt8) ParityDecode(decoder ParityDecoder) {
-	decoder.DecodeOption(&self.hasValue, &self.value)
+func (o *OptionInt8) ParityDecode(decoder ParityDecoder) {
+	decoder.DecodeOption(&o.hasValue, &o.value)
 }
 
 func TestSliceOfOptionInt8EncodedAsExpected(t *testing.T) {
