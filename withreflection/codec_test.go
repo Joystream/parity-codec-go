@@ -57,15 +57,15 @@ func hexify(bytes []byte) string {
 
 func encodeToBytes(value interface{}) []byte {
 	var buffer = bytes.Buffer{}
-	ParityEncoder{&buffer}.Encode(value)
+	Encoder{&buffer}.Encode(value)
 	return buffer.Bytes()
 }
 
 func assertRoundtrip(t *testing.T, value interface{}) {
 	var buffer = bytes.Buffer{}
-	ParityEncoder{&buffer}.Encode(value)
+	Encoder{&buffer}.Encode(value)
 	target := reflect.New(reflect.TypeOf(value))
-	ParityDecoder{&buffer}.Decode(target.Interface())
+	Decoder{&buffer}.Decode(target.Interface())
 	assertEqual(t, target.Elem().Interface(), value)
 }
 
@@ -86,14 +86,14 @@ func TestArrayCannotBeDecodedIntoIncompatible(t *testing.T) {
 	value2 := [5]byte{1, 2, 3, 4, 5}
 	value3 := [1]byte{42}
 	var buffer = bytes.Buffer{}
-	ParityEncoder{&buffer}.Encode(value)
-	assertPanics(func() { ParityDecoder{&buffer}.Decode(&value2) })
+	Encoder{&buffer}.Encode(value)
+	assertPanics(func() { Decoder{&buffer}.Decode(&value2) })
 	buffer.Reset()
-	ParityEncoder{&buffer}.Encode(value)
-	assertPanics(func() { ParityDecoder{&buffer}.Decode(&value3) })
+	Encoder{&buffer}.Encode(value)
+	assertPanics(func() { Decoder{&buffer}.Decode(&value3) })
 	buffer.Reset()
-	ParityEncoder{&buffer}.Encode(value)
-	ParityDecoder{&buffer}.Decode(&value)
+	Encoder{&buffer}.Encode(value)
+	Decoder{&buffer}.Decode(&value)
 }
 
 func TestSliceOfInt16EncodedAsExpected(t *testing.T) {
@@ -110,11 +110,11 @@ type OptionInt8 struct {
 	value    int8
 }
 
-func (o OptionInt8) ParityEncode(encoder ParityEncoder) {
+func (o OptionInt8) ParityEncode(encoder Encoder) {
 	encoder.EncodeOption(o.hasValue, o.value)
 }
 
-func (o *OptionInt8) ParityDecode(decoder ParityDecoder) {
+func (o *OptionInt8) ParityDecode(decoder Decoder) {
 	decoder.DecodeOption(&o.hasValue, &o.value)
 }
 
@@ -161,9 +161,9 @@ func TestCompactIntegersEncodedAsExpected(t *testing.T) {
 		math.MaxUint64: "13 ff ff ff ff ff ff ff ff"}
 	for value, expectedHex := range tests {
 		var buffer = bytes.Buffer{}
-		ParityEncoder{&buffer}.EncodeUintCompact(value)
+		Encoder{&buffer}.EncodeUintCompact(value)
 		assertEqual(t, hexify(buffer.Bytes()), expectedHex)
-		decoded := ParityDecoder{&buffer}.DecodeUintCompact()
+		decoded := Decoder{&buffer}.DecodeUintCompact()
 		assertEqual(t, decoded, value)
 	}
 }

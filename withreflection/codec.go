@@ -38,13 +38,13 @@ func check(err error) {
 	}
 }
 
-// ParityEncoder is a wrapper around a Writer that allows encoding data items to a stream.
-type ParityEncoder struct {
+// Encoder is a wrapper around a Writer that allows encoding data items to a stream.
+type Encoder struct {
 	writer io.Writer
 }
 
 // Write several bytes to the encoder.
-func (pe ParityEncoder) Write(bytes []byte) {
+func (pe Encoder) Write(bytes []byte) {
 	c, err := pe.writer.Write(bytes)
 	check(err)
 	if c < len(bytes) {
@@ -53,7 +53,7 @@ func (pe ParityEncoder) Write(bytes []byte) {
 }
 
 // PushByte writes a single byte to an encoder.
-func (pe ParityEncoder) PushByte(b byte) {
+func (pe Encoder) PushByte(b byte) {
 	pe.Write([]byte{b})
 }
 
@@ -66,7 +66,7 @@ func (pe ParityEncoder) PushByte(b byte) {
 //   zL zL zL 10 / zM zM zM zL / zM zM zM zM / zH zH zH zM					(2**14 ... 2**30 - 1)	(u16, u32)  low LMMH high
 //   nn nn nn 11 [ / zz zz zz zz ]{4 + n}									(2**30 ... 2**536 - 1)	(u32, u64, u128, U256, U512, U520) straight LE-encoded
 // Rust implementation: see impl<'a> Encode for CompactRef<'a, u64>
-func (pe ParityEncoder) EncodeUintCompact(v uint64) {
+func (pe Encoder) EncodeUintCompact(v uint64) {
 
 	// TODO: handle numbers wide than 64 bits (byte slices?)
 	// Currently, Rust implementation only seems to support u128
@@ -98,7 +98,7 @@ func (pe ParityEncoder) EncodeUintCompact(v uint64) {
 }
 
 // Encode a value to the stream.
-func (pe ParityEncoder) Encode(value interface{}) {
+func (pe Encoder) Encode(value interface{}) {
 	t := reflect.TypeOf(value)
 	switch t.Kind() {
 
@@ -162,11 +162,11 @@ func (pe ParityEncoder) Encode(value interface{}) {
 		pe.Encode([]byte(value.(string)))
 
 	case reflect.Struct:
-		encodeable := reflect.TypeOf((*ParityEncodeable)(nil)).Elem()
+		encodeable := reflect.TypeOf((*Encodeable)(nil)).Elem()
 		if t.Implements(encodeable) {
-			value.(ParityEncodeable).ParityEncode(pe)
+			value.(Encodeable).ParityEncode(pe)
 		} else {
-			panic(fmt.Sprintf("Type %s does not support ParityEncodeable interface", t))
+			panic(fmt.Sprintf("Type %s does not support Encodeable interface", t))
 		}
 
 	// Currently unsupported types
@@ -190,7 +190,7 @@ func (pe ParityEncoder) Encode(value interface{}) {
 }
 
 // EncodeOption stores optionally present value to the stream.
-func (pe ParityEncoder) EncodeOption(hasValue bool, value interface{}) {
+func (pe Encoder) EncodeOption(hasValue bool, value interface{}) {
 	if !hasValue {
 		pe.PushByte(0)
 	} else {
@@ -199,17 +199,17 @@ func (pe ParityEncoder) EncodeOption(hasValue bool, value interface{}) {
 	}
 }
 
-// ParityDecoder - a wraper around a Reader that allows decoding data items from a stream.
+// Decoder - a wraper around a Reader that allows decoding data items from a stream.
 // Unlike Rust implementations, decoder methods do not return success state, but just
 // panic on error. Since decoding failue is an "unexpected" error, this approach should
 // be justified.
-type ParityDecoder struct {
+type Decoder struct {
 	reader io.Reader
 }
 
 // Read reads bytes from a stream into a buffer and panics if cannot read the required
 // number of bytes.
-func (pd ParityDecoder) Read(bytes []byte) {
+func (pd Decoder) Read(bytes []byte) {
 	c, err := pd.reader.Read(bytes)
 	check(err)
 	if c < len(bytes) {
@@ -219,14 +219,14 @@ func (pd ParityDecoder) Read(bytes []byte) {
 
 // ReadOneByte reads a next byte from the stream.
 // Named so to avoid a linter warning about a clash with io.ByteReader.ReadByte
-func (pd ParityDecoder) ReadOneByte() byte {
+func (pd Decoder) ReadOneByte() byte {
 	buf := []byte{0}
 	pd.Read(buf)
 	return buf[0]
 }
 
 // Decode takes a pointer to a decodable value and populates it from the stream.
-func (pd ParityDecoder) Decode(target interface{}) {
+func (pd Decoder) Decode(target interface{}) {
 	t0 := reflect.TypeOf(target)
 	if t0.Kind() != reflect.Ptr {
 		panic("Target must be a pointer, but was " + fmt.Sprint(t0))
@@ -239,7 +239,7 @@ func (pd ParityDecoder) Decode(target interface{}) {
 }
 
 // DecodeIntoReflectValue populates a writable reflect.Value from the stream
-func (pd ParityDecoder) DecodeIntoReflectValue(target reflect.Value) {
+func (pd Decoder) DecodeIntoReflectValue(target reflect.Value) {
 	t := target.Type()
 	if !target.CanSet() {
 		panic("Unsettable value " + fmt.Sprint(t))
@@ -327,14 +327,14 @@ func (pd ParityDecoder) DecodeIntoReflectValue(target reflect.Value) {
 		target.SetString(string(bytes))
 
 	case reflect.Struct:
-		encodeable := reflect.TypeOf((*ParityDecodeable)(nil)).Elem()
+		encodeable := reflect.TypeOf((*Decodeable)(nil)).Elem()
 		ptrType := reflect.PtrTo(t)
 		if ptrType.Implements(encodeable) {
 			ptrVal := reflect.New(t)
-			ptrVal.Interface().(ParityDecodeable).ParityDecode(pd)
+			ptrVal.Interface().(Decodeable).ParityDecode(pd)
 			target.Set(ptrVal.Elem())
 		} else {
-			panic(fmt.Sprintf("Type %s does not support ParityDecodeable interface", ptrType))
+			panic(fmt.Sprintf("Type %s does not support Decodeable interface", ptrType))
 		}
 
 	// Currently unsupported types
@@ -358,7 +358,7 @@ func (pd ParityDecoder) DecodeIntoReflectValue(target reflect.Value) {
 }
 
 // DecodeUintCompact decodes a compact-encoded integer. See EncodeUintCompact method.
-func (pd ParityDecoder) DecodeUintCompact() uint64 {
+func (pd Decoder) DecodeUintCompact() uint64 {
 	b := pd.ReadOneByte()
 	mode := b & 3
 	switch mode {
@@ -390,7 +390,7 @@ func (pd ParityDecoder) DecodeUintCompact() uint64 {
 }
 
 // DecodeOption decodes a optionally available value into a boolean presence field and a value.
-func (pd ParityDecoder) DecodeOption(hasValue *bool, valuePointer interface{}) {
+func (pd Decoder) DecodeOption(hasValue *bool, valuePointer interface{}) {
 	b := pd.ReadOneByte()
 	switch b {
 	case 0:
@@ -403,20 +403,20 @@ func (pd ParityDecoder) DecodeOption(hasValue *bool, valuePointer interface{}) {
 	}
 }
 
-// ParityEncodeable is an interface that defines a custom encoding rules for a data type.
+// Encodeable is an interface that defines a custom encoding rules for a data type.
 // Should be defined for structs (not pointers to them).
 // See OptionBool for an example implementation.
-type ParityEncodeable interface {
+type Encodeable interface {
 	// ParityEncode encodes and write this structure into a stream
-	ParityEncode(encoder ParityEncoder)
+	ParityEncode(encoder Encoder)
 }
 
-// ParityDecodeable is an interface that defines a custom encoding rules for a data type.
+// Decodeable is an interface that defines a custom encoding rules for a data type.
 // Should be defined for pointers to structs.
 // See OptionBool for an example implementation.
-type ParityDecodeable interface {
+type Decodeable interface {
 	// ParityDecode populates this structure from a stream (overwriting the current contents), return false on failure
-	ParityDecode(decoder ParityDecoder)
+	ParityDecode(decoder Decoder)
 }
 
 // OptionBool is a structure that can store a boolean or a missing value.
@@ -437,7 +437,7 @@ func NewOptionBool(value bool) OptionBool {
 }
 
 // ParityEncode implements encoding for OptionBool as per Rust implementation.
-func (o OptionBool) ParityEncode(encoder ParityEncoder) {
+func (o OptionBool) ParityEncode(encoder Encoder) {
 	if !o.hasValue {
 		encoder.PushByte(0)
 	} else {
@@ -450,7 +450,7 @@ func (o OptionBool) ParityEncode(encoder ParityEncoder) {
 }
 
 // ParityDecode implements decoding for OptionBool as per Rust implementation.
-func (o *OptionBool) ParityDecode(decoder ParityDecoder) {
+func (o *OptionBool) ParityDecode(decoder Decoder) {
 	b := decoder.ReadOneByte()
 	switch b {
 	case 0:
@@ -470,6 +470,6 @@ func (o *OptionBool) ParityDecode(decoder ParityDecoder) {
 // ToKeyedVec replicates the behaviour of Rust's to_keyed_vec helper.
 func ToKeyedVec(value interface{}, prependKey []byte) []byte {
 	var buffer = bytes.NewBuffer(prependKey)
-	ParityEncoder{buffer}.Encode(value)
+	Encoder{buffer}.Encode(value)
 	return buffer.Bytes()
 }
