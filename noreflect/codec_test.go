@@ -78,15 +78,15 @@ func TestSliceOfBytesEncodedAsExpected(t *testing.T) {
 }
 
 // You need to define types for your slices like this
-type Int16Slice struct{ v []int16 }
+type Int16Slice []int16
 
-func (s Int16Slice) Len() int                               { return len(s.v) }
-func (s Int16Slice) ParityEncodeElement(i int, pe Encoder)  { pe.EncodeInt(int64(s.v[i]), 2) }
-func (s *Int16Slice) Make(l int)                            { s.v = make([]int16, l) }
-func (s *Int16Slice) ParityDecodeElement(i int, pd Decoder) { s.v[i] = int16(pd.DecodeInt(2)) }
+func (s Int16Slice) Len() int                               { return len(s) }
+func (s Int16Slice) ParityEncodeElement(i int, pe Encoder)  { pe.EncodeInt(int64(s[i]), 2) }
+func (s *Int16Slice) Make(l int)                            { *s = make([]int16, l) }
+func (s *Int16Slice) ParityDecodeElement(i int, pd Decoder) { (*s)[i] = int16(pd.DecodeInt(2)) }
 
 func TestSliceOfInt16EncodedAsExpected(t *testing.T) {
-	value := Int16Slice{[]int16{0, 1, -1, 2, -2, 3, -3}}
+	value := Int16Slice([]int16{0, 1, -1, 2, -2, 3, -3})
 
 	pd := verifyEncodingReturnDecoder(t,
 		func(pe Encoder) { pe.EncodeSlice(value) },
@@ -155,19 +155,19 @@ func TestOptionBoolEncodedAsExpected(t *testing.T) {
 	}
 }
 
-type StringSlice struct{ v []string }
+type StringSlice []string
 
-func (s StringSlice) Len() int                               { return len(s.v) }
-func (s StringSlice) ParityEncodeElement(i int, pe Encoder)  { pe.EncodeString(s.v[i]) }
-func (s *StringSlice) Make(l int)                            { s.v = make([]string, l) }
-func (s *StringSlice) ParityDecodeElement(i int, pd Decoder) { s.v[i] = pd.DecodeString() }
+func (s StringSlice) Len() int                               { return len(s) }
+func (s StringSlice) ParityEncodeElement(i int, pe Encoder)  { pe.EncodeString(s[i]) }
+func (s *StringSlice) Make(l int)                            { *s = make([]string, l) }
+func (s *StringSlice) ParityDecodeElement(i int, pd Decoder) { (*s)[i] = pd.DecodeString() }
 
 func TestSliceOfStringEncodedAsExpected(t *testing.T) {
-	value := StringSlice{[]string{
+	value := StringSlice([]string{
 		"Hamlet",
 		"Война и мир",
 		"三国演义",
-		"أَلْف لَيْلَة وَلَيْلَة‎"}}
+		"أَلْف لَيْلَة وَلَيْلَة‎"})
 
 	pd := verifyEncodingReturnDecoder(t,
 		func(pe Encoder) { pe.EncodeSlice(value) },
