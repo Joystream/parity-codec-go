@@ -35,12 +35,12 @@ func check(err error) {
 
 // Encoder is a wrapper around a Writer that allows encoding data items to a stream.
 type Encoder struct {
-	writer io.Writer
+	Writer io.Writer
 }
 
 // Write several bytes to the encoder.
 func (pe Encoder) Write(bytes []byte) {
-	c, err := pe.writer.Write(bytes)
+	c, err := pe.Writer.Write(bytes)
 	check(err)
 	if c < len(bytes) {
 		panic(fmt.Sprintf("Could not write %d bytes to writer", len(bytes)))
@@ -70,9 +70,9 @@ func (pe Encoder) EncodeUintCompact(v uint64) {
 		if v < 1<<6 {
 			pe.PushByte(byte(v) << 2)
 		} else if v < 1<<14 {
-			binary.Write(pe.writer, binary.LittleEndian, uint16(v<<2)+1)
+			binary.Write(pe.Writer, binary.LittleEndian, uint16(v<<2)+1)
 		} else {
-			binary.Write(pe.writer, binary.LittleEndian, uint32(v<<2)+2)
+			binary.Write(pe.Writer, binary.LittleEndian, uint32(v<<2)+2)
 		}
 		return
 	}
@@ -142,13 +142,13 @@ func (pe Encoder) EncodeOption(hasValue bool, value Encodeable) {
 // panic on error. Since decoding failue is an "unexpected" error, this approach should
 // be justified.
 type Decoder struct {
-	reader io.Reader
+	Reader io.Reader
 }
 
 // Read reads bytes from a stream into a buffer and panics if cannot read the required
 // number of bytes.
 func (pd Decoder) Read(bytes []byte) {
-	c, err := pd.reader.Read(bytes)
+	c, err := pd.Reader.Read(bytes)
 	check(err)
 	if c < len(bytes) {
 		panic(fmt.Sprintf("Cannot read the required number of bytes %d, only %d available", len(bytes), c))
