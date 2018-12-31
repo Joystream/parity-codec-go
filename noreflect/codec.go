@@ -16,6 +16,7 @@ package noreflect
 
 // Adapted from https://github.com/Joystream/parity-codec-go
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -336,4 +337,15 @@ func (o *OptionBool) ParityDecode(decoder Decoder) {
 	default:
 		panic(fmt.Sprintf("Unknown byte prefix for encoded OptionBool: %d", b))
 	}
+}
+
+func Encode(value Encodeable) []byte {
+	var buffer = bytes.Buffer{}
+	value.ParityEncode(Encoder{&buffer})
+	return buffer.Bytes()
+}
+
+func Decode(value Decodeable, encoded []byte) {
+	var buffer = bytes.NewBuffer(encoded)
+	value.ParityDecode(Decoder{buffer})
 }
