@@ -18,8 +18,8 @@ package noreflect
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"io"
+	"strconv"
 )
 
 // Implementation for Parity codec in Tinygo.
@@ -44,7 +44,7 @@ func (pe Encoder) Write(bytes []byte) {
 	c, err := pe.Writer.Write(bytes)
 	check(err)
 	if c < len(bytes) {
-		panic(fmt.Sprintf("Could not write %d bytes to writer", len(bytes)))
+		panic("Could not write " + strconv.Itoa(len(bytes)) + " bytes to writer")
 	}
 }
 
@@ -155,7 +155,7 @@ func (pd Decoder) Read(bytes []byte) {
 	c, err := pd.Reader.Read(bytes)
 	check(err)
 	if c < len(bytes) {
-		panic(fmt.Sprintf("Cannot read the required number of bytes %d, only %d available", len(bytes), c))
+		panic("Cannot read the required number of bytes " + strconv.Itoa(len(bytes)) + ", only " + strconv.Itoa(c) + " available")
 	}
 }
 
@@ -247,7 +247,7 @@ func (pd Decoder) DecodeOption(hasValue *bool, valuePointer Decodeable) {
 		*hasValue = true
 		valuePointer.ParityDecode(pd)
 	default:
-		panic(fmt.Sprintf("Unknown byte prefix for encoded Option: %d", b))
+		panic("Unknown byte prefix for encoded Option: " + strconv.Itoa(int(b)))
 	}
 }
 
@@ -338,7 +338,7 @@ func (o *OptionBool) ParityDecode(decoder Decoder) {
 		o.hasValue = true
 		o.value = false
 	default:
-		panic(fmt.Sprintf("Unknown byte prefix for encoded OptionBool: %d", b))
+		panic("Unknown byte prefix for encoded OptionBool: " + strconv.Itoa(int(b)))
 	}
 }
 
