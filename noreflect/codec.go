@@ -67,13 +67,17 @@ func (pe Encoder) EncodeUintCompact(v uint64) {
 	// TODO: handle numbers wide than 64 bits (byte slices?)
 	// Currently, Rust implementation only seems to support u128
 
+	buf := make([]byte, 8)
+
 	if v < 1<<30 {
 		if v < 1<<6 {
 			pe.PushByte(byte(v) << 2)
 		} else if v < 1<<14 {
-			binary.Write(pe.Writer, binary.LittleEndian, uint16(v<<2)+1)
+			binary.LittleEndian.PutUint16(buf, uint16(v<<2)+1)
+			pe.Write(buf[:2])
 		} else {
-			binary.Write(pe.Writer, binary.LittleEndian, uint32(v<<2)+2)
+			binary.LittleEndian.PutUint32(buf, uint32(v<<2)+2)
+			pe.Write(buf[:4])
 		}
 		return
 	}
@@ -88,7 +92,6 @@ func (pe Encoder) EncodeUintCompact(v uint64) {
 		panic("Assertion error: n>4 needed to compact-encode uint64")
 	}
 	pe.PushByte((n << 2) + 3)
-	buf := make([]byte, 8)
 	binary.LittleEndian.PutUint64(buf, v)
 	pe.Write(buf[:4+n])
 }
