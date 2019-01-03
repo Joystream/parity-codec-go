@@ -77,23 +77,27 @@ func TestSliceOfBytesEncodedAsExpected(t *testing.T) {
 	assertEqual(t, pd.DecodeByteSlice(), value)
 }
 
-// You need to define types for your slices like this
-type Int16Slice []int16
-
-func (s Int16Slice) Len() int                               { return len(s) }
-func (s Int16Slice) ParityEncodeElement(i int, pe Encoder)  { pe.EncodeInt(int64(s[i]), 2) }
-func (s *Int16Slice) Make(l int)                            { *s = make([]int16, l) }
-func (s *Int16Slice) ParityDecodeElement(i int, pd Decoder) { (*s)[i] = int16(pd.DecodeInt(2)) }
+// You can either define a type for your slice:
+// type Int16Slice []int16
+// with methods ParityEncode and ParityDecode
 
 func TestSliceOfInt16EncodedAsExpected(t *testing.T) {
-	value := Int16Slice([]int16{0, 1, -1, 2, -2, 3, -3})
+	value := []int16{0, 1, -1, 2, -2, 3, -3}
 
 	pd := verifyEncodingReturnDecoder(t,
-		func(pe Encoder) { pe.EncodeSlice(value) },
+		func(pe Encoder) {
+			pe.EncodeCollection(
+				len(value),
+				func(i int) { pe.EncodeInt(int64(value[i]), 2) },
+			)
+		},
 		"1c 00 00 01 00 ff ff 02 00 fe ff 03 00 fd ff",
 	)
-	var v2 Int16Slice
-	pd.DecodeSlice(&v2)
+	var v2 []int16
+	pd.DecodeCollection(
+		func(n int) { v2 = make([]int16, n) },
+		func(i int) { v2[i] = int16(pd.DecodeInt(2)) },
+	)
 	assertEqual(t, v2, value)
 }
 
@@ -155,29 +159,30 @@ func TestOptionBoolEncodedAsExpected(t *testing.T) {
 	}
 }
 
-type StringSlice []string
-
-func (s StringSlice) Len() int                               { return len(s) }
-func (s StringSlice) ParityEncodeElement(i int, pe Encoder)  { pe.EncodeString(s[i]) }
-func (s *StringSlice) Make(l int)                            { *s = make([]string, l) }
-func (s *StringSlice) ParityDecodeElement(i int, pd Decoder) { (*s)[i] = pd.DecodeString() }
-
 func TestSliceOfStringEncodedAsExpected(t *testing.T) {
-	value := StringSlice([]string{
+	value := []string{
 		"Hamlet",
 		"Война и мир",
 		"三国演义",
-		"أَلْف لَيْلَة وَلَيْلَة‎"})
+		"أَلْف لَيْلَة وَلَيْلَة‎"}
 
 	pd := verifyEncodingReturnDecoder(t,
-		func(pe Encoder) { pe.EncodeSlice(value) },
+		func(pe Encoder) {
+			pe.EncodeCollection(
+				len(value),
+				func(i int) { pe.EncodeString(value[i]) },
+			)
+		},
 		"10 18 48 61 6d 6c 65 74 50 d0 92 d0 be d0 b9 d0 bd d0 b0 20 d0 "+
 			"b8 20 d0 bc d0 b8 d1 80 30 e4 b8 89 e5 9b bd e6 bc 94 e4 b9 89 bc d8 a3 d9 8e d9 84 d9 92 "+
 			"d9 81 20 d9 84 d9 8e d9 8a d9 92 d9 84 d9 8e d8 a9 20 d9 88 d9 8e d9 84 d9 8e d9 8a d9 92 "+
 			"d9 84 d9 8e d8 a9 e2 80 8e",
 	)
-	var v2 StringSlice
-	pd.DecodeSlice(&v2)
+	var v2 []string
+	pd.DecodeCollection(
+		func(n int) { v2 = make([]string, n) },
+		func(i int) { v2[i] = pd.DecodeString() },
+	)
 	assertEqual(t, v2, value)
 }
 

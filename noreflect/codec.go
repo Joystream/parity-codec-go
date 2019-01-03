@@ -259,17 +259,11 @@ type Encodeable interface {
 	ParityEncode(encoder Encoder)
 }
 
-// See Int16Slice in tests as an example
-type EncodeableSlice interface {
-	Len() int
-	ParityEncodeElement(index int, encoder Encoder)
-}
-
-func (pe Encoder) EncodeSlice(s EncodeableSlice) {
-	len := s.Len()
-	pe.EncodeUintCompact(uint64(len))
-	for i := 0; i < len; i++ {
-		s.ParityEncodeElement(i, pe)
+// See []int16 in tests as an example
+func (pe Encoder) EncodeCollection(length int, encodeElem func(int)) {
+	pe.EncodeUintCompact(uint64(length))
+	for i := 0; i < length; i++ {
+		encodeElem(i)
 	}
 }
 
@@ -281,16 +275,12 @@ type Decodeable interface {
 	ParityDecode(decoder Decoder)
 }
 
-type DecodeableSlice interface {
-	Make(size int)
-	ParityDecodeElement(index int, decoder Decoder)
-}
-
-func (pd Decoder) DecodeSlice(s DecodeableSlice) {
+// See []int16 in tests as an example
+func (pd Decoder) DecodeCollection(setSize func(int), decodeElem func(int)) {
 	l := int(pd.DecodeUintCompact())
-	s.Make(l)
+	setSize(l)
 	for i := 0; i < l; i++ {
-		s.ParityDecodeElement(i, pd)
+		decodeElem(i)
 	}
 }
 
