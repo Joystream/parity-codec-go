@@ -30,7 +30,7 @@ const maxInt = int(maxUint >> 1)
 
 func check(err error) {
 	if err != nil {
-		panic(err)
+		panic(err.Error())
 	}
 }
 
