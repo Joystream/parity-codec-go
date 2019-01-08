@@ -228,7 +228,7 @@ func (pd Decoder) DecodeUintCompact() uint64 {
 }
 
 func (pd Decoder) DecodeByteSlice() []byte {
-	value := make([]byte, pd.DecodeUintCompact())
+	value := make([]byte, uintptr(pd.DecodeUintCompact()))
 	pd.Read(value)
 	return value
 }
