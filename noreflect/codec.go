@@ -399,7 +399,7 @@ func ToBytesCustom(encode func(Encoder)) []byte {
 	return buffer.Bytes()
 }
 
-// FromBytes is a method to decode an decodeable value from a byte slice
+// FromBytes is a method to decode a decodeable value from a byte slice
 func FromBytes(value Decodeable, encoded []byte) {
 	var buffer = bytes.NewBuffer(encoded)
 	value.ParityDecode(Decoder{buffer})
