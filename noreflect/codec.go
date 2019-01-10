@@ -385,22 +385,22 @@ func (o *OptionBool) ParityDecode(decoder Decoder) {
 	}
 }
 
-// Helper method to encode an encodeable value as a byte slice
-func Encode(value Encodeable) []byte {
+// ToBytes is a helper method to encode an encodeable value as a byte slice
+func ToBytes(value Encodeable) []byte {
 	var buffer = bytes.Buffer{}
 	value.ParityEncode(Encoder{&buffer})
 	return buffer.Bytes()
 }
 
-// Helper method to run a custom encoding sequence and return result as a byte slice
-func EncodeCustom(encode func(Encoder)) []byte {
+// ToBytesCustom is a helper method to run a custom encoding sequence and return result as a byte slice
+func ToBytesCustom(encode func(Encoder)) []byte {
 	var buffer = bytes.Buffer{}
 	encode(Encoder{&buffer})
 	return buffer.Bytes()
 }
 
-// Helper method to decode an decodeable value from a byte slice
-func Decode(value Decodeable, encoded []byte) {
+// FromBytes is a method to decode an decodeable value from a byte slice
+func FromBytes(value Decodeable, encoded []byte) {
 	var buffer = bytes.NewBuffer(encoded)
 	value.ParityDecode(Decoder{buffer})
 }
