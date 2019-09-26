@@ -30,7 +30,7 @@ const maxInt = int(maxUint >> 1)
 
 func check(err error) {
 	if err != nil {
-		panic(err)
+		panic(err.Error())
 	}
 }
 
@@ -48,10 +48,15 @@ func (pe Encoder) Write(bytes []byte) {
 	}
 }
 
-// PushByte writes a single byte to an encoder.
-func (pe Encoder) PushByte(b byte) {
-	pe.Write([]byte{b})
+// EncodeByte writes a single byte to an encoder.
+func (pe Encoder) EncodeByte(b byte) {
+	intBuf[0] = b
+	pe.Write(intBuf[:1])
 }
+
+// Reusable buffer to encode/decode integers. Should be safe, since WASM is
+// single-threaded by default.
+var intBuf [8]byte
 
 // EncodeUintCompact writes an unsigned integer to the stream using the compact encoding.
 // A typical usage is storing the length of a collection.
@@ -67,17 +72,17 @@ func (pe Encoder) EncodeUintCompact(v uint64) {
 	// TODO: handle numbers wide than 64 bits (byte slices?)
 	// Currently, Rust implementation only seems to support u128
 
-	buf := make([]byte, 8)
-
 	if v < 1<<30 {
 		if v < 1<<6 {
-			pe.PushByte(byte(v) << 2)
+			pe.EncodeByte(byte(v) << 2)
 		} else if v < 1<<14 {
+			buf := intBuf[:2]
 			binary.LittleEndian.PutUint16(buf, uint16(v<<2)+1)
-			pe.Write(buf[:2])
+			pe.Write(buf)
 		} else {
+			buf := intBuf[:4]
 			binary.LittleEndian.PutUint32(buf, uint32(v<<2)+2)
-			pe.Write(buf[:4])
+			pe.Write(buf)
 		}
 		return
 	}
@@ -91,42 +96,68 @@ func (pe Encoder) EncodeUintCompact(v uint64) {
 	if n > 4 {
 		panic("Assertion error: n>4 needed to compact-encode uint64")
 	}
-	pe.PushByte((n << 2) + 3)
-	binary.LittleEndian.PutUint64(buf, v)
-	pe.Write(buf[:4+n])
+	pe.EncodeByte((n << 2) + 3)
+	binary.LittleEndian.PutUint64(intBuf[:8], v)
+	pe.Write(intBuf[:4+n])
 }
 
-// TODO: codegeneration
-
-func (pe Encoder) EncodeUint(value uint64, bytes int) {
-	mask := uint64(255)
-	for i := 0; i < bytes; i++ {
-		pe.PushByte(byte(value & mask))
-		value = value >> 8
-	}
+// EncodeUint64 writes a uint64 to the encoder
+func (pe Encoder) EncodeUint64(value uint64) {
+	buf := intBuf[:8]
+	binary.LittleEndian.PutUint64(buf, value)
+	pe.Write(buf)
 }
 
-func (pe Encoder) EncodeInt(value int64, bytes int) {
-	mask := int64(255)
-	for i := 0; i < bytes; i++ {
-		pe.PushByte(byte(value & mask))
-		value = value >> 8
-	}
+// EncodeUint32 writes a uint32 to the encoder
+func (pe Encoder) EncodeUint32(value uint32) {
+	buf := intBuf[:4]
+	binary.LittleEndian.PutUint32(buf, value)
+	pe.Write(buf)
 }
 
+// EncodeUint16 writes a uint16 to the encoder
+func (pe Encoder) EncodeUint16(value uint16) {
+	buf := intBuf[:2]
+	binary.LittleEndian.PutUint16(buf, value)
+	pe.Write(buf)
+}
+
+// EncodeInt64 writes a int64 to the encoder
+func (pe Encoder) EncodeInt64(value int64) {
+	pe.EncodeUint64(uint64(value))
+}
+
+// EncodeInt32 writes a int32 to the encoder
+func (pe Encoder) EncodeInt32(value int32) {
+	pe.EncodeUint32(uint32(value))
+}
+
+// EncodeInt16 writes a int16 to the encoder
+func (pe Encoder) EncodeInt16(value int16) {
+	pe.EncodeUint16(uint16(value))
+}
+
+// EncodeInt8 writes a int8 to the encoder
+func (pe Encoder) EncodeInt8(value int8) {
+	pe.EncodeByte(byte(value))
+}
+
+// EncodeBool writes a boolean to the encoder
 func (pe Encoder) EncodeBool(b bool) {
 	if b {
-		pe.PushByte(1)
+		pe.EncodeByte(1)
 	} else {
-		pe.PushByte(0)
+		pe.EncodeByte(0)
 	}
 }
 
+// EncodeByteSlice writes a slice of bytes to the encoder
 func (pe Encoder) EncodeByteSlice(value []byte) {
 	pe.EncodeUintCompact(uint64(len(value)))
 	pe.Write(value)
 }
 
+// EncodeString writes a UTF-8 string to the encoder
 func (pe Encoder) EncodeString(value string) {
 	pe.EncodeByteSlice([]byte(value))
 }
@@ -134,9 +165,9 @@ func (pe Encoder) EncodeString(value string) {
 // EncodeOption stores optionally present value to the stream.
 func (pe Encoder) EncodeOption(hasValue bool, value Encodeable) {
 	if !hasValue {
-		pe.PushByte(0)
+		pe.EncodeByte(0)
 	} else {
-		pe.PushByte(1)
+		pe.EncodeByte(1)
 		value.ParityEncode(pe)
 	}
 }
@@ -159,58 +190,74 @@ func (pd Decoder) Read(bytes []byte) {
 	}
 }
 
-// ReadOneByte reads a next byte from the stream.
-// Named so to avoid a linter warning about a clash with io.ByteReader.ReadByte
-func (pd Decoder) ReadOneByte() byte {
-	buf := []byte{0}
+// DecodeByte reads a next byte from the stream.
+func (pd Decoder) DecodeByte() byte {
+	pd.Read(intBuf[:1])
+	return intBuf[0]
+}
+
+// DecodeUint64 reads a uint64 from the stream.
+func (pd Decoder) DecodeUint64() uint64 {
+	buf := intBuf[:8]
 	pd.Read(buf)
-	return buf[0]
+	return binary.LittleEndian.Uint64(buf)
 }
 
-func (pd Decoder) DecodeUint(bytes uint) uint64 {
-	var value uint64
-	for i := uint(0); i < bytes; i++ {
-		b := uint64(pd.ReadOneByte())
-		value |= b << (i * 8)
-	}
-	return value
+// DecodeUint32 reads a uint32 from the stream.
+func (pd Decoder) DecodeUint32() uint32 {
+	buf := intBuf[:4]
+	pd.Read(buf)
+	return binary.LittleEndian.Uint32(buf)
 }
 
-func (pd Decoder) DecodeInt(bytes uint) int64 {
-	var value uint64
-	var b uint64
-	for i := uint(0); i < bytes; i++ {
-		b = uint64(pd.ReadOneByte())
-		value |= b << (i * 8)
-	}
-	if b >= 128 {
-		for i := bytes; i < 8; i++ {
-			value |= b << 255
-		}
-	}
-	return int64(value)
+// DecodeUint16 reads a uint16 from the stream.
+func (pd Decoder) DecodeUint16() uint16 {
+	buf := intBuf[:2]
+	pd.Read(buf)
+	return binary.LittleEndian.Uint16(buf)
 }
 
+// DecodeInt64 reads a int64 from the stream.
+func (pd Decoder) DecodeInt64() int64 {
+	return int64(pd.DecodeUint64())
+}
+
+// DecodeInt32 reads a int32 from the stream.
+func (pd Decoder) DecodeInt32() int32 {
+	return int32(pd.DecodeUint32())
+}
+
+// DecodeInt16 reads a int16 from the stream.
+func (pd Decoder) DecodeInt16() int16 {
+	return int16(pd.DecodeUint16())
+}
+
+// DecodeInt8 reads a int8 from the stream.
+func (pd Decoder) DecodeInt8() int8 {
+	return int8(pd.DecodeByte())
+}
+
+// DecodeBool reads a bool from the stream.
 func (pd Decoder) DecodeBool() bool {
-	return pd.ReadOneByte() > 0
+	return pd.DecodeByte() > 0
 }
 
 // DecodeUintCompact decodes a compact-encoded integer. See EncodeUintCompact method.
 func (pd Decoder) DecodeUintCompact() uint64 {
-	b := pd.ReadOneByte()
+	b := pd.DecodeByte()
 	mode := b & 3
 	switch mode {
 	case 0:
 		return uint64(b >> 2)
 	case 1:
-		r := uint64(pd.ReadOneByte())
+		r := uint64(pd.DecodeByte())
 		r <<= 6
 		r += uint64(b >> 2)
 		return r
 	case 2:
-		buf := make([]byte, 4)
+		buf := intBuf[:4]
 		buf[0] = b
-		pd.Read(buf[1:4])
+		pd.Read(intBuf[1:4])
 		r := binary.LittleEndian.Uint32(buf)
 		r >>= 2
 		return uint64(r)
@@ -219,27 +266,31 @@ func (pd Decoder) DecodeUintCompact() uint64 {
 		if n > 4 {
 			panic("Not supported: n>4 encountered when decoding a compact-encoded uint")
 		}
-		buf := make([]byte, 8)
-		pd.Read(buf[:n+4])
-		return binary.LittleEndian.Uint64(buf)
+		pd.Read(intBuf[:n+4])
+		for i := n + 4; i < 8; i++ {
+			intBuf[i] = 0
+		}
+		return binary.LittleEndian.Uint64(intBuf[:8])
 	default:
 		panic("Code should be unreachable")
 	}
 }
 
+// DecodeByteSlice reads a slice of bytes from the stream
 func (pd Decoder) DecodeByteSlice() []byte {
-	value := make([]byte, pd.DecodeUintCompact())
+	value := make([]byte, uintptr(pd.DecodeUintCompact()))
 	pd.Read(value)
 	return value
 }
 
+// DecodeString reads a UTF-8 string from the stream
 func (pd Decoder) DecodeString() string {
 	return string(pd.DecodeByteSlice())
 }
 
 // DecodeOption decodes a optionally available value into a boolean presence field and a value.
 func (pd Decoder) DecodeOption(hasValue *bool, valuePointer Decodeable) {
-	b := pd.ReadOneByte()
+	b := pd.DecodeByte()
 	switch b {
 	case 0:
 		*hasValue = false
@@ -259,6 +310,7 @@ type Encodeable interface {
 	ParityEncode(encoder Encoder)
 }
 
+// EncodeCollection encodes a collection using a per-element callback.
 // See []int16 in tests as an example
 func (pe Encoder) EncodeCollection(length int, encodeElem func(int)) {
 	pe.EncodeUintCompact(uint64(length))
@@ -275,6 +327,7 @@ type Decodeable interface {
 	ParityDecode(decoder Decoder)
 }
 
+// DecodeCollection encodes a collection using a maker callback and a per-element callback.
 // See []int16 in tests as an example
 func (pd Decoder) DecodeCollection(setSize func(int), decodeElem func(int)) {
 	l := int(pd.DecodeUintCompact())
@@ -304,19 +357,19 @@ func NewOptionBool(value bool) OptionBool {
 // ParityEncode implements encoding for OptionBool as per Rust implementation.
 func (o OptionBool) ParityEncode(encoder Encoder) {
 	if !o.hasValue {
-		encoder.PushByte(0)
+		encoder.EncodeByte(0)
 	} else {
 		if o.value {
-			encoder.PushByte(1)
+			encoder.EncodeByte(1)
 		} else {
-			encoder.PushByte(2)
+			encoder.EncodeByte(2)
 		}
 	}
 }
 
 // ParityDecode implements decoding for OptionBool as per Rust implementation.
 func (o *OptionBool) ParityDecode(decoder Decoder) {
-	b := decoder.ReadOneByte()
+	b := decoder.DecodeByte()
 	switch b {
 	case 0:
 		o.hasValue = false
@@ -332,13 +385,22 @@ func (o *OptionBool) ParityDecode(decoder Decoder) {
 	}
 }
 
-func Encode(value Encodeable) []byte {
+// ToBytes is a helper method to encode an encodeable value as a byte slice
+func ToBytes(value Encodeable) []byte {
 	var buffer = bytes.Buffer{}
 	value.ParityEncode(Encoder{&buffer})
 	return buffer.Bytes()
 }
 
-func Decode(value Decodeable, encoded []byte) {
+// ToBytesCustom is a helper method to run a custom encoding sequence and return result as a byte slice
+func ToBytesCustom(encode func(Encoder)) []byte {
+	var buffer = bytes.Buffer{}
+	encode(Encoder{&buffer})
+	return buffer.Bytes()
+}
+
+// FromBytes is a method to decode a decodeable value from a byte slice
+func FromBytes(value Decodeable, encoded []byte) {
 	var buffer = bytes.NewBuffer(encoded)
 	value.ParityDecode(Decoder{buffer})
 }

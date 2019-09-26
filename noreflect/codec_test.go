@@ -88,7 +88,7 @@ func TestSliceOfInt16EncodedAsExpected(t *testing.T) {
 		func(pe Encoder) {
 			pe.EncodeCollection(
 				len(value),
-				func(i int) { pe.EncodeInt(int64(value[i]), 2) },
+				func(i int) { pe.EncodeInt16(value[i]) },
 			)
 		},
 		"1c 00 00 01 00 ff ff 02 00 fe ff 03 00 fd ff",
@@ -96,7 +96,7 @@ func TestSliceOfInt16EncodedAsExpected(t *testing.T) {
 	var v2 []int16
 	pd.DecodeCollection(
 		func(n int) { v2 = make([]int16, n) },
-		func(i int) { v2[i] = int16(pd.DecodeInt(2)) },
+		func(i int) { v2[i] = pd.DecodeInt16() },
 	)
 	assertEqual(t, v2, value)
 }
@@ -112,14 +112,14 @@ type OptionInt8 struct {
 func (o OptionInt8) ParityEncode(pe Encoder) {
 	pe.EncodeBool(o.hasValue)
 	if o.hasValue {
-		pe.EncodeInt(int64(o.value), 1)
+		pe.EncodeInt8(o.value)
 	}
 }
 
 func (o *OptionInt8) ParityDecode(pd Decoder) {
 	o.hasValue = pd.DecodeBool()
 	if o.hasValue {
-		o.value = int8(pd.DecodeInt(1))
+		o.value = pd.DecodeInt8()
 	}
 }
 
